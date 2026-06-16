@@ -1,8 +1,11 @@
 ---
-title: "Análisis comparativo del perfil mutacional de SARS-CoV-2 entre las subvariantes BA.1 (México) y BA.2 (Estados Unidos) durante el primer trimestre de 2022"
+title: "Análisis comparativo del perfil mutacional de SARS-CoV-2 entre las subvariantes
+  BA.1 (México) y BA.2 (Estados Unidos) durante el primer trimestre de 2022"
 author: "Luis Alberto Cervantes García - A01425776; Carlos Alberto Galán Gómez - A01425194"
 date: "`r Sys.Date()`"
-output: html_document
+output:
+  html_document: default
+  pdf_document: default
 ---
 
 ```{r setup, include=FALSE}
@@ -529,3 +532,325 @@ ggplot(dist_df, aes(x = tipo, y = distancia, fill = tipo)) +
 Si la distancia intergrupal (rojo) es sistemáticamente mayor que la intragrupal
 (azul), la hipótesis queda respaldada: las secuencias de México y EUA son entre sí
 más diferentes de lo que lo son las secuencias dentro de cada país.
+
+## Resultados
+
+### Tabla 1 — Mutaciones no sinónimas por gen y por país
+
+La tabla muestra el total de eventos de cambio de aminoácido detectados en cada gen
+para el grupo de México (BA.1) y el de EUA (BA.2), ambos respecto a la cepa Wuhan.
+Un valor mayor indica mayor divergencia respecto al ancestro en esa región genómica.
+
+```{r tabla-gen-pais, message=FALSE}
+library(tidyr)
+tabla_gen <- resumen_gen %>%
+  pivot_wider(names_from = pais, values_from = n_mutaciones, values_fill = 0) %>%
+  arrange(gen)
+
+knitr::kable(
+  tabla_gen,
+  col.names = c("Gen", "México (BA.1)", "EUA (BA.2)"),
+  caption   = "Tabla 1. Mutaciones no sinónimas totales por gen y por grupo"
+)
+```
+
+### Tabla 2 — Mutaciones exclusivas y compartidas en Spike
+
+La proteína Spike es el principal blanco de la respuesta inmune y el determinante
+más importante de transmisibilidad. La tabla siguiente lista los cambios de
+aminoácido en Spike que son exclusivos de cada país y los que ambos grupos comparten.
+
+```{r tabla-spike-exclusivas}
+excl_mex_spike <- datos_mex %>%
+  filter(gen == "S") %>%
+  mutate(mut_key = paste0("S_", cambioAmino)) %>%
+  filter(mut_key %in% excl_mex) %>%
+  count(cambioAmino, name = "n_Mexico") %>%
+  rename(Mutacion = cambioAmino) %>%
+  mutate(Grupo = "Exclusiva Mexico (BA.1)")
+
+excl_usa_spike <- datos_usa %>%
+  filter(gen == "S") %>%
+  mutate(mut_key = paste0("S_", cambioAmino)) %>%
+  filter(mut_key %in% excl_usa) %>%
+  count(cambioAmino, name = "n_USA") %>%
+  rename(Mutacion = cambioAmino) %>%
+  mutate(Grupo = "Exclusiva EUA (BA.2)")
+
+comp_spike <- datos_mex %>%
+  filter(gen == "S") %>%
+  mutate(mut_key = paste0("S_", cambioAmino)) %>%
+  filter(mut_key %in% compartidas) %>%
+  count(cambioAmino, name = "n_Mexico") %>%
+  rename(Mutacion = cambioAmino) %>%
+  mutate(Grupo = "Compartida")
+
+tabla_spike <- bind_rows(
+  excl_mex_spike %>% select(Grupo, Mutacion),
+  excl_usa_spike %>% select(Grupo, Mutacion),
+  comp_spike     %>% select(Grupo, Mutacion)
+) %>% arrange(Grupo, Mutacion)
+
+knitr::kable(
+  tabla_spike,
+  col.names = c("Categoría", "Cambio de aminoácido"),
+  caption   = "Tabla 2. Mutaciones no sinónimas en Spike: exclusivas vs. compartidas"
+)
+```
+
+### Tabla 3 — Distancias mutacionales intra e intergrupo
+
+```{r tabla-distancias}
+knitr::kable(
+  resumen_dist,
+  col.names = c("Tipo de comparación", "N pares", "Media", "Desv. estándar",
+                "Mínimo", "Máximo"),
+  caption   = "Tabla 3. Distancias mutacionales (Hamming) entre pares de secuencias"
+)
+```
+
+### Alineación representativa del gen Spike
+
+Para ilustrar concretamente cómo difieren las secuencias entre países, se muestra
+a continuación una alineación por posición del gen Spike entre la primera secuencia
+de México (BA.1) y la primera de EUA (BA.2). Las posiciones marcadas con `|`
+indican nucleótidos distintos; las marcadas con `.` son idénticas.
+
+```{r alineacion-spike}
+spike_i <- NA
+for (i in seq_along(ref)) {
+  h <- attr(ref[[i]], "Annot")
+  if (grepl("\\[gene=S\\]", h)) { spike_i <- i; break }
+}
+
+n_genes_ref <- length(ref)
+
+spike_mex1 <- mexico[[spike_i]]
+spike_mex1[spike_mex1 == "T"] <- "U"
+
+spike_usa1 <- usa[[spike_i]]
+spike_usa1[spike_usa1 == "T"] <- "U"
+
+diff_spike <- which(spike_mex1 != spike_usa1)
+cat(sprintf("Longitud del gen Spike: %d nt (%d codones)\n",
+            length(spike_mex1), length(spike_mex1) %/% 3))
+cat(sprintf("Posiciones que difieren entre Mexico_1 y USA_1: %d\n\n",
+            length(diff_spike)))
+
+mostrar_ventana <- function(s1, s2, pos, nombre1, nombre2, flank = 18) {
+  inicio <- max(1, pos - flank)
+  fin    <- min(length(s1), pos + flank)
+  seg1   <- s1[inicio:fin]
+  seg2   <- s2[inicio:fin]
+  marca  <- ifelse(seg1 == seg2, ".", "|")
+  cat(sprintf("--- Posición %d (nucleótido %d, codón %d) ---\n",
+              pos, pos, (pos - 1) %/% 3 + 1))
+  cat(sprintf("  %-10s  %s\n", nombre1, paste(seg1, collapse = "")))
+  cat(sprintf("  %-10s  %s\n", "",      paste(marca, collapse = "")))
+  cat(sprintf("  %-10s  %s\n\n", nombre2, paste(seg2, collapse = "")))
+}
+
+for (p in head(diff_spike, 6)) {
+  mostrar_ventana(spike_mex1, spike_usa1, p, "Mexico_1", "USA_1")
+}
+```
+
+### Gráfica 1 — Tipos de sustitución nucleotídica
+
+*(Generada en el Paso 6 del procesamiento de datos)*
+
+```{r ref-grafica-nucleotidos, echo=FALSE, fig.width=8, fig.height=5}
+ggplot(datos_A, aes(x = reorder(Mutation, -n), y = n, fill = pais)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  facet_wrap(~pais, scales = "free_x") +
+  labs(
+    title = "Tipos de sustitución nucleotídica con frecuencia > 20 % del total",
+    x     = "Tipo de mutación",
+    y     = "Frecuencia",
+    fill  = "País"
+  ) +
+  scale_fill_manual(values = c(Mexico = "steelblue", USA = "tomato")) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "none")
+```
+
+### Gráfica 2 — Cambios de aminoácido por gen
+
+*(Generada en el Paso 7 del procesamiento de datos)*
+
+```{r ref-grafica-aminoacidos, echo=FALSE, fig.width=14, fig.height=6, warning=FALSE}
+ggplot(datos_B, aes(x = cambioAmino, y = n, fill = pais)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  facet_grid(pais ~ gen, scales = "free", space = "free_x") +
+  labs(
+    title = paste0("Cambios de aminoácido por gen presentes en ≥ ",
+                   round(umbral_B), " secuencia(s) (≥ 20 %)"),
+    x    = "Cambio de aminoácido",
+    y    = "Frecuencia",
+    fill = "País"
+  ) +
+  scale_fill_manual(values = c(Mexico = "steelblue", USA = "tomato")) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 60, hjust = 1))
+```
+
+### Gráfica 3 — Variabilidad intragrupal vs. intergrupal
+
+*(Generada en el Paso 8d del procesamiento de datos)*
+
+```{r ref-boxplot, echo=FALSE, fig.width=6, fig.height=5}
+ggplot(dist_df, aes(x = tipo, y = distancia, fill = tipo)) +
+  geom_boxplot(width = 0.45, alpha = 0.8, outlier.shape = NA) +
+  geom_jitter(width = 0.12, size = 2.5, alpha = 0.7) +
+  scale_fill_manual(values = c(Intragrupal = "steelblue", Intergrupal = "tomato")) +
+  labs(
+    title    = "Variabilidad intragrupal vs. intergrupal",
+    subtitle = "Distancia = mutaciones no sinónimas que difieren entre dos secuencias",
+    x        = NULL,
+    y        = "Distancia mutacional"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+## Conclusiones
+
+### Contraste con la hipótesis
+
+La hipótesis planteaba dos condiciones: (1) que la variabilidad intergrupal
+superara a la intragrupal y (2) que las diferencias entre ambos grupos se
+concentraran en regiones de relevancia funcional, particularmente en la
+proteína Spike. Los resultados corroboran la primera condición de forma
+clara: la distancia mutacional promedio entre secuencias de distinto país
+fue de 3.0 mutaciones (DE = 0.6), frente a 0.4 mutaciones (DE = 0.5) dentro
+de cada país. Las secuencias de México y de Estados Unidos son, por tanto,
+sistemáticamente más distintas entre sí de lo que lo son las secuencias de un
+mismo origen, lo que es consistente con la circulación de poblaciones virales
+diferenciadas en cada contexto geográfico.
+
+La segunda condición, en cambio, no se cumple en los términos anticipados.
+De las siete mutaciones no sinónimas únicas que diferencian a los grupos,
+ninguna se localizó en la proteína Spike: las dos mutaciones exclusivas de
+Estados Unidos (BA.2) recayeron en los genes accesorios ORF3a y ORF6, la
+única mutación exclusiva de México (BA.1) en ORF7b, y las cuatro mutaciones
+compartidas en los genes estructurales E y M. Es importante precisar que esta
+ausencia de señal en Spike no constituye evidencia de que las subvariantes no
+difieran en esa región —difieren, según la literatura—, sino que refleja una
+limitación del procedimiento empleado: la comparación posición a posición
+contra la referencia de Wuhan descarta todo gen cuya longitud difiera de la
+referencia, y Spike, ORF1ab y N portan inserciones y deleciones propias de
+Ómicron que provocaron precisamente ese descarte. En consecuencia, la
+distribución genómica de las diferencias detectadas es biológicamente
+interpretable —de modo que la hipótesis no se refuta bajo el criterio que
+formulamos—, pero no puede afirmarse que se concentre en Spike, porque Spike
+no fue evaluable con esta implementación.
+
+En síntesis, la hipótesis se corrobora parcialmente: existe una divergencia
+intergrupal real y estructurada, pero la afirmación específica sobre su
+concentración en la proteína Spike queda fuera del alcance de los datos tal
+como fueron procesados.
+
+### Interpretación biológica
+
+La señal diferencial detectada recae en genes accesorios vinculados a la
+modulación de la respuesta inmune innata, no en los genes de entrada o
+ensamblaje. Las mutaciones exclusivas de BA.2 (Estados Unidos) se ubicaron en
+ORF3a —viroporina implicada en la liberación de viriones y en la activación
+del inflamasoma NLRP3— y en ORF6 —antagonista del interferón que bloquea el
+transporte núcleo-citoplasmático de STAT1 y STAT2—, mientras que la mutación
+exclusiva de BA.1 (México) se localizó en ORF7b, asociado a la modulación del
+interferón tipo I. Que las diferencias entre poblaciones se concentren en este
+conjunto de genes, y que los genes estructurales E y M permanezcan compartidos
+(más conservados, como corresponde a su papel en el ensamblaje del virión),
+sugiere que la divergencia observable en estos genomas afecta preferentemente
+a los mecanismos de evasión inmunológica antes que a la maquinaria estructural.
+
+No obstante, esta interpretación debe tomarse como preliminar. El número de
+genomas por grupo es reducido (cinco por país), el conjunto de mutaciones
+informativas es pequeño (siete), y —de manera determinante— el análisis no
+incluyó los genes funcionalmente más relevantes para la transmisibilidad y el
+escape inmune (Spike, ORF1ab, N). Por lo tanto, la divergencia en genes
+accesorios documentada aquí describe el subconjunto del genoma que el método
+logró resolver, y no necesariamente el componente dominante de la diferencia
+biológica entre BA.1 y BA.2.
+
+### Implicaciones para la evolución de la pandemia
+
+Más allá del resultado puntual, el ejercicio deja una lección metodológica con
+implicaciones directas para la vigilancia genómica: los genes que mejor
+discriminan entre variantes de SARS-CoV-2 —empezando por Spike— son también
+los que acumulan inserciones y deleciones, y por ello son los más propensos a
+quedar excluidos de cualquier comparación que asuma homología posicional sin
+alineamiento previo. Un pipeline que no maneje indels tenderá sistemáticamente
+a subestimar la divergencia en las regiones de mayor relevancia epidemiológica,
+que es justo donde la información importa para anticipar cambios en
+transmisibilidad o en respuesta a vacunas y anticuerpos terapéuticos.
+
+En el plano biológico, la transición de BA.1 a BA.2 durante el primer trimestre
+de 2022, más acelerada en Estados Unidos que en México, ilustra una dinámica
+recurrente del virus: la sucesión de sublinajes con ventajas de transmisibilidad
+que desplazan a sus predecesores dentro de un mismo linaje, modulada por
+factores poblacionales como la densidad, el ritmo de vacunación y la inmunidad
+previa por infección. Confirmar si esa sucesión dejó una huella diferencial en
+las poblaciones virales de cada país a nivel de Spike requiere repetir el
+análisis con una estrategia de alineamiento que incorpore explícitamente los
+indels; solo entonces podrá ponerse a prueba la cláusula central de la
+hipótesis aquí planteada.
+
+## Referencias
+
+Brant, A. C., Tian, W., Majerciak, V., Yang, W., & Zheng, Z. M. (2021). SARS-CoV-2:
+from its discovery to genome structure, transcription, and replication. *Cell &
+Bioscience*, *11*, 136. https://doi.org/10.1186/s13578-021-00643-z
+
+Hu, B., Chan, J. F. W., Liu, H., Liu, Y., Chai, Y., Shi, J., Shuai, H., Hou, Y.,
+Huang, X., Yuen, T. T. T., Yoon, C., Zhu, T., Zhang, J., Li, W., Zhang, A. J.,
+Zhou, J., Yuan, S., Zhang, B. Z., Yuen, K. Y., & Chu, H. (2022). Spike mutations
+contributing to the altered entry preference of SARS-CoV-2 Omicron BA.1 and BA.2.
+*Emerging Microbes & Infections*, *11*(1), 2275–2287.
+https://doi.org/10.1080/22221751.2022.2117098
+
+Motozono, C., Toyoda, M., Tan, T. S., Hamana, H., Goto, Y., Aoki, S., Takata, H.,
+Mahiti, M., Ode, H., Kobayashi, T., Okazaki, M., Nasser, H., Yoshimatsu, K.,
+Tahu, T., Tsuda, M., Ikeda, T., Sato, K., Nakagama, Y., Kido, Y., ... Takiguchi, M.
+(2022). The SARS-CoV-2 Omicron BA.1 spike G446S mutation potentiates antiviral
+T-cell recognition. *Nature Communications*, *13*, 5440.
+https://doi.org/10.1038/s41467-022-33068-4
+
+National Center for Biotechnology Information. (2022). *SARS-CoV-2 sequences,
+GenBank database*. U.S. National Library of Medicine.
+https://www.ncbi.nlm.nih.gov/genbank/
+
+Pastorio, C., Zech, F., Noettger, S., Jung, C., Jacob, T., Sanderson, T., Sparrer,
+K. M. J., & Kirchhoff, F. (2022). Determinants of Spike infectivity, processing,
+and neutralization in SARS-CoV-2 Omicron subvariants BA.1 and BA.2. *Cell Host &
+Microbe*, *31*(9), 1329–1345. https://doi.org/10.1016/j.chom.2022.07.006
+
+Willett, B. J., Grove, J., MacLean, O. A., Wilkie, C., De Lorenzo, G., Furnon, W.,
+Cantoni, D., Scott, S., Logan, N., Ashraf, S., Manali, M., Szemiel, A., Cowton, V.,
+Pevelen, A., McSharry, L., McCaul, M., Orton, R., Puxty, K., Johnson, P., ...
+Thomson, E. C. (2022). SARS-CoV-2 Omicron is an immune escape variant with an
+altered cell entry pathway. *Nature Microbiology*, *7*, 1161–1179.
+https://doi.org/10.1038/s41564-022-01143-7
+
+World Health Organization. (2020, March 11). *WHO Director-General's opening remarks
+at the media briefing on COVID-19*. https://www.who.int/director-general/speeches/
+detail/who-director-general-s-opening-remarks-at-the-media-briefing-on-covid-19---
+11-march-2020
+
+Wu, F., Zhao, S., Yu, B., Chen, Y. M., Wang, W., Song, Z. G., Hu, Y., Tao, Z. W.,
+Tian, J. H., Pei, Y. Y., Yuan, M. L., Zhang, Y. L., Dai, F. H., Liu, Y., Wang, Q.
+M., Zheng, J. J., Xu, L., Holmes, E. C., & Zhang, Y. Z. (2020). A new coronavirus
+associated with human respiratory disease in China. *Nature*, *579*, 265–269.
+https://doi.org/10.1038/s41586-020-2008-3
+
+Zarate, S., Taboada, B., Rosales-Rivera, M., Garcia-Lopez, R., Munoz-Medina, J. E.,
+Sanchez-Flores, A., Herrera-Estrella, A., Gomez-Gil, B., Selem-Mojica, N., Arias,
+C. F., et al. (2022). *SARS-CoV-2 complete genome sequences from Mexico, 2022*
+[GenBank: OQ087860, OQ089449, OQ088330, OQ091034, OQ091171]. NCBI GenBank.
+
+Zhou, P., Yang, X. L., Wang, X. G., Hu, B., Zhang, L., Zhang, W., Si, H. R., Zhu,
+Y., Li, B., Huang, C. L., Chen, H. D., Chen, J., Luo, Y., Guo, H., Jiang, R. D.,
+Liu, M. Q., Chen, Y., Shen, X. R., Wang, X., ... Shi, Z. L. (2020). A pneumonia
+outbreak associated with a new coronavirus of probable bat origin. *Nature*, *579*,
+270–273. https://doi.org/10.1038/s41586-020-2012-7
