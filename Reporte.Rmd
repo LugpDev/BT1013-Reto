@@ -126,11 +126,406 @@ degradación de proteínas antivirales.
 > o de vigilancia epidemiológica diferencial favorecieron la fijación de mutaciones 
 > específicas en cada contexto geográfico.*
 
-Esta hipótesis se corroborará si el análisis comparativo de alineaciones de genoma 
-completo revela que: las mutaciones diferenciales entre ambos grupos son 
-consistentes al interior de cada país, es decir, que la variabilidad intragrupo es 
-menor que la variabilidad intergrupo; y dichas mutaciones diferenciales se 
-concentran en regiones del genoma con relevancia funcional conocida, particularmente 
-en la proteína Spike. Por el contrario, la hipótesis deberá refutarse si la 
-variabilidad intragrupol supera a la intergrupal, o si las diferencias observadas 
+Esta hipótesis se corroborará si el análisis comparativo de alineaciones de genoma
+completo revela que: las mutaciones diferenciales entre ambos grupos son
+consistentes al interior de cada país, es decir, que la variabilidad intragrupo es
+menor que la variabilidad intergrupo; y dichas mutaciones diferenciales se
+concentran en regiones del genoma con relevancia funcional conocida, particularmente
+en la proteína Spike. Por el contrario, la hipótesis deberá refutarse si la
+variabilidad intragrupol supera a la intergrupal, o si las diferencias observadas
 no muestran un patrón de distribución genómica interpretable biológicamente.
+
+## Procesamiento de datos
+
+### Datos utilizados
+
+Para este análisis se emplearon tres conjuntos de secuencias codificantes en formato
+FASTA, todos descargados de NCBI GenBank:
+
+- **`wuhan.txt`** — 12 secuencias codificantes de la cepa de referencia original
+  (NC_045512.2, Wuhan-Hu-1). Cada entrada corresponde a un gen distinto del genoma
+  de SARS-CoV-2.
+- **`mexico.fasta`** — 60 secuencias codificantes correspondientes a 5 genomas
+  completos de la subvariante BA.1 recolectados en México entre enero y marzo de 2022
+  (5 organismos × 12 genes = 60 regiones codificantes).
+- **`usa.fasta`** — 60 secuencias codificantes con la misma estructura, pero
+  provenientes de 5 genomas de la subvariante BA.2 recolectados en Estados Unidos
+  durante el mismo trimestre.
+
+En total se analizaron **10 genomas** (5 por país), comparando cada región codificante
+contra su homóloga en la cepa de referencia Wuhan para identificar mutaciones no
+sinónimas.
+
+### Paso 1: Carga de librerías y definición de la tabla de codones
+
+```{r librerias, message=FALSE, warning=FALSE}
+library(seqinr)
+library(dplyr)
+library(ggplot2)
+```
+
+El paquete `seqinr` provee la función `read.fasta()` para leer archivos FASTA
+directamente en R. Los paquetes `dplyr` y `ggplot2` se utilizan para manipular y
+visualizar los datos resultantes.
+
+A continuación se define la tabla de traducción del código genético estándar, que
+mapea cada triplete de ARN (codón) a su aminoácido correspondiente. Esta tabla se
+usará para determinar si una sustitución nucleotídica produce o no un cambio de
+aminoácido.
+
+```{r tabla-codones}
+trad <- c(
+  UUU = "F", UUC = "F", UUA = "L", UUG = "L",
+  UCU = "S", UCC = "S", UCA = "S", UCG = "S",
+  UAU = "Y", UAC = "Y", UAA = "STOP", UAG = "STOP",
+  UGU = "C", UGC = "C", UGA = "STOP", UGG = "W",
+  CUU = "L", CUC = "L", CUA = "L", CUG = "L",
+  CCU = "P", CCC = "P", CCA = "P", CCG = "P",
+  CAU = "H", CAC = "H", CAA = "Q", CAG = "Q",
+  CGU = "R", CGC = "R", CGA = "R", CGG = "R",
+  AUU = "I", AUC = "I", AUA = "I", AUG = "M",
+  ACU = "T", ACC = "T", ACA = "T", ACG = "T",
+  AAU = "N", AAC = "N", AAA = "K", AAG = "K",
+  AGU = "S", AGC = "S", AGA = "R", AGG = "R",
+  GUU = "V", GUC = "V", GUA = "V", GUG = "V",
+  GCU = "A", GCC = "A", GCA = "A", GCG = "A",
+  GAU = "D", GAC = "D", GAA = "E", GAG = "E",
+  GGU = "G", GGC = "G", GGA = "G", GGG = "G"
+)
+```
+
+### Paso 2: Lectura de los archivos FASTA
+
+```{r lectura-secuencias}
+ref      <- read.fasta("wuhan.txt",    forceDNAtolower = FALSE)
+mexico   <- read.fasta("mexico.fasta", forceDNAtolower = FALSE)
+usa      <- read.fasta("usa.fasta",    forceDNAtolower = FALSE)
+
+n_genes     <- length(ref)
+n_mex       <- length(mexico) / n_genes
+n_usa       <- length(usa)    / n_genes
+
+cat("Referencia (Wuhan):", n_genes,  "genes\n")
+cat("México (BA.1):",      n_mex,    "genomas,", length(mexico), "regiones codificantes\n")
+cat("EUA (BA.2):",         n_usa,    "genomas,", length(usa),    "regiones codificantes\n")
+```
+
+`read.fasta()` devuelve una lista donde cada elemento es un vector de caracteres
+que representa los nucleótidos de una región codificante. El orden de los genes en
+`mexico.fasta` y `usa.fasta` es idéntico al de `wuhan.txt`, lo que permite acceder
+a los homólogos mediante indexación aritmética (`seq(i, length(variantes), n_genes)`).
+
+### Paso 3: Función de llamada de mutaciones no sinónimas
+
+El procedimiento central del análisis consiste en comparar, gen por gen y secuencia
+por secuencia, los codones de cada variante contra los de la referencia de Wuhan.
+Sólo se registran las sustituciones que cambian el aminoácido codificado (mutaciones
+**no sinónimas**), ya que son las que pueden tener consecuencia funcional.
+
+El flujo de información para cada par (gen de referencia, gen variante) es el
+siguiente:
+
+1. Convertir todas las `T` (timina, notación ADN) a `U` (uracilo, notación ARN).
+2. Identificar las posiciones donde la secuencia variante difiere de la referencia.
+3. Determinar el codón al que pertenece cada posición diferente.
+4. Traducir ambos codones con la tabla `trad`.
+5. Si los aminoácidos resultantes son distintos, registrar la mutación.
+
+Se encapsula este procedimiento en una función reutilizable para aplicarla
+indistintamente al conjunto de México y al de EUA:
+
+```{r funcion-mutaciones}
+llamar_mutaciones <- function(ref, variantes, pais) {
+  n_genes <- length(ref)
+
+  datos <- data.frame(
+    pais        = character(),
+    seq_id      = character(),
+    Mutation    = character(),
+    cambioCodon = character(),
+    cambioAmino = character(),
+    ncodon      = integer(),
+    gen         = character(),
+    stringsAsFactors = FALSE
+  )
+
+  for (i in seq_along(ref)) {
+    # ORF1a (gen 2) es subconjunto de ORF1ab (gen 1); se omite para no duplicar
+    if (i == 2) next
+
+    gen_ref <- ref[[i]]
+    gen_ref[gen_ref == "T"] <- "U"
+
+    header     <- attr(gen_ref, "Annot")
+    gene_match <- regmatches(header, regexpr("(?<=\\[gene=)[^\\]]+", header, perl = TRUE))
+    gene_label <- if (length(gene_match) > 0) gene_match[1] else paste0("Gen", i)
+
+    seq_num <- 0
+    for (k in seq(i, length(variantes), n_genes)) {
+      seq_num <- seq_num + 1
+      gen_var <- variantes[[k]]
+      gen_var[gen_var == "T"] <- "U"
+
+      if (length(gen_ref) != length(gen_var)) next
+
+      diff_pos     <- which(gen_ref != gen_var)
+      vistos_codon <- integer(0)
+
+      for (j in diff_pos) {
+        inicio    <- j - ((j - 1) %% 3)
+        num_codon <- (j - 1) %/% 3 + 1
+
+        if (num_codon %in% vistos_codon)    next
+        if (inicio + 2 > length(gen_ref))   next
+
+        codon1 <- paste0(gen_ref[inicio], gen_ref[inicio + 1], gen_ref[inicio + 2])
+        codon2 <- paste0(gen_var[inicio], gen_var[inicio + 1], gen_var[inicio + 2])
+        aa1    <- unname(trad[codon1])
+        aa2    <- unname(trad[codon2])
+
+        if (is.na(aa1) || is.na(aa2) || aa1 == aa2) next
+
+        vistos_codon <- c(vistos_codon, num_codon)
+
+        datos <- rbind(datos, data.frame(
+          pais        = pais,
+          seq_id      = paste0(pais, "_", seq_num),
+          Mutation    = paste0(gen_ref[j], "to", gen_var[j]),
+          cambioCodon = paste0(codon1, "to", codon2),
+          cambioAmino = paste0(aa1, num_codon, aa2),
+          ncodon      = num_codon,
+          gen         = gene_label,
+          stringsAsFactors = FALSE
+        ))
+      }
+    }
+  }
+  datos
+}
+```
+
+### Paso 4: Construcción de los data frames de mutaciones
+
+Se aplica la función a cada grupo de secuencias y se obtienen dos data frames
+separados: `datos_mex` para BA.1/México y `datos_usa` para BA.2/EUA. Posteriormente
+se combinan en un único data frame `datos_all` que incluye una columna `pais` para
+facilitar la comparación.
+
+Cada fila de estos data frames representa **una mutación no sinónima** observada en
+una secuencia específica. Las columnas son:
+
+| Columna       | Descripción                                              |
+|---------------|----------------------------------------------------------|
+| `pais`        | País de origen de la secuencia (`Mexico` / `USA`)        |
+| `seq_id`      | Identificador único de la secuencia (e.g., `Mexico_1`)   |
+| `Mutation`    | Sustitución nucleotídica (e.g., `AtoG`)                  |
+| `cambioCodon` | Par de codones implicados (e.g., `AUGtoGUG`)             |
+| `cambioAmino` | Cambio de aminoácido en notación estándar (e.g., `M1V`)  |
+| `ncodon`      | Posición del codón dentro del gen                        |
+| `gen`         | Gen en el que ocurre la mutación                         |
+
+```{r construir-datos, warning=FALSE}
+datos_mex <- llamar_mutaciones(ref, mexico, "Mexico")
+datos_usa <- llamar_mutaciones(ref, usa,    "USA")
+datos_all <- rbind(datos_mex, datos_usa)
+
+cat("Mutaciones no sinónimas en México (BA.1):", nrow(datos_mex), "\n")
+cat("Mutaciones no sinónimas en EUA (BA.2):",    nrow(datos_usa), "\n")
+cat("Total combinado:",                           nrow(datos_all), "\n")
+```
+
+### Paso 5: Resumen por gen
+
+Para entender cómo se distribuyen las mutaciones a lo largo del genoma se construye
+un tercer data frame, `resumen_gen`, que agrega el conteo de mutaciones por gen y
+por país.
+
+```{r resumen-gen}
+resumen_gen <- datos_all %>%
+  count(pais, gen, name = "n_mutaciones") %>%
+  arrange(gen, pais)
+
+print(resumen_gen)
+```
+
+### Paso 6: Visualización — frecuencia de tipos de sustitución nucleotídica
+
+Se grafican los tipos de sustitución nucleotídica (e.g., `AtoG`, `CtoT`) con una
+frecuencia superior al 20 % del total de mutaciones registradas en cada grupo. Esto
+permite identificar los sesgos mutacionales predominantes en cada subvariante.
+
+```{r grafica-nucleotidos, fig.width=8, fig.height=5}
+umbral_A <- 0.20
+
+datos_A <- datos_all %>%
+  group_by(pais) %>%
+  mutate(total = n()) %>%
+  ungroup() %>%
+  count(pais, Mutation, total, name = "n") %>%
+  filter(n / total > umbral_A) %>%
+  arrange(pais, desc(n))
+
+ggplot(datos_A, aes(x = reorder(Mutation, -n), y = n, fill = pais)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  facet_wrap(~pais, scales = "free_x") +
+  labs(
+    title = "Tipos de sustitución nucleotídica con frecuencia > 20 % del total",
+    x     = "Tipo de mutación",
+    y     = "Frecuencia",
+    fill  = "País"
+  ) +
+  scale_fill_manual(values = c(Mexico = "steelblue", USA = "tomato")) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), legend.position = "none")
+```
+
+### Paso 7: Visualización — cambios de aminoácido por gen
+
+Finalmente se identifican los cambios de aminoácido presentes en más del 20 % de
+las secuencias de cada grupo (umbral = 1 de 5 secuencias), separados por gen. Esta
+gráfica es la más informativa para comparar el perfil mutacional entre BA.1 y BA.2,
+ya que muestra directamente qué posiciones de qué proteínas difieren entre ambas
+subvariantes.
+
+```{r grafica-aminoacidos, fig.width=14, fig.height=6, warning=FALSE}
+umbral_B <- 0.20 * 5  # 20 % de 5 secuencias = 1 secuencia mínimo
+
+datos_B <- datos_all %>%
+  count(pais, gen, cambioAmino, name = "n") %>%
+  filter(n >= umbral_B) %>%
+  arrange(gen, pais, desc(n))
+
+ggplot(datos_B, aes(x = cambioAmino, y = n, fill = pais)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  facet_grid(pais ~ gen, scales = "free", space = "free_x") +
+  labs(
+    title = paste0("Cambios de aminoácido por gen presentes en ≥ ",
+                   round(umbral_B), " secuencia(s) (≥ 20 %)"),
+    x    = "Cambio de aminoácido",
+    y    = "Frecuencia",
+    fill = "País"
+  ) +
+  scale_fill_manual(values = c(Mexico = "steelblue", USA = "tomato")) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 60, hjust = 1))
+```
+
+### Paso 8: Variabilidad intragrupal vs. intergrupal
+
+Para evaluar la hipótesis es necesario comparar directamente cuánto se diferencian
+las secuencias entre sí dentro de cada país (variabilidad **intragrupal**) versus
+cuánto difieren las secuencias mexicanas de las estadounidenses (variabilidad
+**intergrupal**). La hipótesis predice que la variabilidad intergrupal debe superar
+a la intragrupal.
+
+La métrica utilizada es la **distancia mutacional**: el número de mutaciones no
+sinónimas (respecto a Wuhan) que están presentes en una secuencia pero ausentes en
+otra. Con 5 secuencias por país se generan C(5,2) = 10 pares intragrupo por país
+y 5 × 5 = 25 pares intergrupo, para un total de 45 comparaciones.
+
+#### Paso 8a: Matriz de presencia/ausencia de mutaciones
+
+Primero se construye una matriz binaria donde las filas son las 10 secuencias y las
+columnas son todas las mutaciones no sinónimas únicas observadas. El valor 1 indica
+que esa mutación está presente en esa secuencia; 0 indica ausencia.
+
+```{r matriz-mutaciones}
+todos_id  <- datos_all
+todos_id$mut_key <- paste0(todos_id$gen, "_", todos_id$cambioAmino)
+
+seqs     <- unique(todos_id$seq_id)
+all_muts <- unique(todos_id$mut_key)
+
+mat <- matrix(0L, nrow = length(seqs), ncol = length(all_muts),
+              dimnames = list(seqs, all_muts))
+for (r in seq_len(nrow(todos_id))) {
+  mat[todos_id$seq_id[r], todos_id$mut_key[r]] <- 1L
+}
+
+cat("Dimensiones de la matriz:", nrow(mat), "secuencias ×", ncol(mat), "mutaciones\n")
+```
+
+#### Paso 8b: Cálculo de distancias por pares
+
+Para cada par de secuencias se cuenta cuántas columnas de la matriz difieren entre
+ambas (equivalente a la distancia de Hamming sobre el perfil mutacional).
+
+```{r distancias-pares}
+n_seqs <- length(seqs)
+dist_df <- data.frame(
+  seq1      = character(),
+  seq2      = character(),
+  tipo      = character(),
+  distancia = integer(),
+  stringsAsFactors = FALSE
+)
+
+for (a in seq_len(n_seqs - 1)) {
+  for (b in seq(a + 1, n_seqs)) {
+    s1    <- seqs[a]
+    s2    <- seqs[b]
+    d     <- sum(mat[s1, ] != mat[s2, ])
+    pais1 <- sub("_[0-9]+$", "", s1)
+    pais2 <- sub("_[0-9]+$", "", s2)
+    tipo  <- if (pais1 == pais2) "Intragrupal" else "Intergrupal"
+
+    dist_df <- rbind(dist_df, data.frame(
+      seq1 = s1, seq2 = s2, tipo = tipo, distancia = d,
+      stringsAsFactors = FALSE
+    ))
+  }
+}
+
+resumen_dist <- dist_df %>%
+  group_by(tipo) %>%
+  summarise(
+    n_pares  = n(),
+    media    = round(mean(distancia), 1),
+    desv_std = round(sd(distancia),   1),
+    minimo   = min(distancia),
+    maximo   = max(distancia),
+    .groups  = "drop"
+  )
+
+print(resumen_dist)
+```
+
+#### Paso 8c: Mutaciones exclusivas y compartidas entre grupos
+
+Además de las distancias, se cuantifica qué mutaciones son exclusivas de cada país
+y cuáles son compartidas, lo que permite saber en qué medida los perfiles
+mutacionales de BA.1 y BA.2 se solapan.
+
+```{r mutaciones-exclusivas}
+muts_mex <- unique(paste0(datos_mex$gen, "_", datos_mex$cambioAmino))
+muts_usa <- unique(paste0(datos_usa$gen, "_", datos_usa$cambioAmino))
+
+excl_mex    <- setdiff(muts_mex, muts_usa)
+excl_usa    <- setdiff(muts_usa, muts_mex)
+compartidas <- intersect(muts_mex, muts_usa)
+
+cat("Mutaciones exclusivas de México (BA.1):", length(excl_mex),    "\n")
+cat("Mutaciones exclusivas de EUA    (BA.2):", length(excl_usa),    "\n")
+cat("Mutaciones compartidas:",                  length(compartidas), "\n")
+```
+
+#### Paso 8d: Visualización — boxplot de distancias
+
+```{r boxplot-distancias, fig.width=6, fig.height=5}
+ggplot(dist_df, aes(x = tipo, y = distancia, fill = tipo)) +
+  geom_boxplot(width = 0.45, alpha = 0.8, outlier.shape = NA) +
+  geom_jitter(width = 0.12, size = 2.5, alpha = 0.7) +
+  scale_fill_manual(values = c(Intragrupal = "steelblue", Intergrupal = "tomato")) +
+  labs(
+    title    = "Variabilidad intragrupal vs. intergrupal",
+    subtitle = "Distancia = mutaciones no sinónimas que difieren entre dos secuencias",
+    x        = NULL,
+    y        = "Distancia mutacional"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none")
+```
+
+Si la distancia intergrupal (rojo) es sistemáticamente mayor que la intragrupal
+(azul), la hipótesis queda respaldada: las secuencias de México y EUA son entre sí
+más diferentes de lo que lo son las secuencias dentro de cada país.
