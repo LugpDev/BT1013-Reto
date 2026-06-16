@@ -1,0 +1,118 @@
+---
+title: "Análisis comparativo del perfil mutacional de SARS-CoV-2 entre las subvariantes BA.1 (México) y BA.2 (Estados Unidos) durante el primer trimestre de 2022"
+author: "Luis Alberto Cervantes García - A01425776; Carlos Alberto Galán Gómez - A01425194"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introducción
+
+El 31 de diciembre de 2019, las autoridades sanitarias de China notificaron a la Organización Mundial de la Salud (OMS) un cluster de casos de neumonía de etiología desconocida en la ciudad de Wuhan, provincia de Hubei. En semanas, el agente causal fue identificado como un nuevo betacoronavirus, denominado posteriormente SARS-CoV-2, y la enfermedad que provoca recibió el nombre de COVID-19 (Coronavirus Disease 2019). Para el 11 de marzo de 2020, la OMS declaró oficialmente el brote como pandemia, reconociendo la transmisión sostenida del virus en múltiples regiones del mundo de manera simultánea.  
+El origen zoonótico del SARS-CoV-2 ha sido objeto de extensa investigación desde los primeros meses de la pandemia. La hipótesis con mayor respaldo científico señala a los murciélagos del género Rhinolophus como reservorio natural del virus, dado que los coronavirus de esa familia comparten hasta un 96% de identidad genómica con el SARS-CoV-2. Sin embargo, la transmisión directa murciélago-humano se considera poco probable; se postula la existencia de un hospedero intermediario — el pangolín (Manis javanica) ha sido propuesto como candidato, aunque el debate científico sobre este punto permanece abierto.  
+Desde su aparición, el SARS-CoV-2 ha demostrado una notable capacidad evolutiva. La primera variante en propagarse globalmente de manera documentada fue la D614G, una mutación puntual en la proteína Spike que emergió en Europa a principios de 2020 y desplazó rápidamente a la cepa original de Wuhan al conferir mayor eficiencia de transmisión. A partir de entonces, la OMS ha designado múltiples Variants of Concern (VOC): Alpha (B.1.1.7), Beta (B.1.351), Gamma (P.1), Delta (B.1.617.2) y Omicron (B.1.1.529), cada una caracterizada por constelaciones de mutaciones que alteraron en distinta medida la transmisibilidad, la severidad clínica y la capacidad de evasión inmunitaria del virus.  
+La variante Omicron, detectada por primera vez en Sudáfrica en noviembre de 2021, marcó un punto de inflexión en la pandemia. Con más de 50 mutaciones respecto a la cepa original — más de 30 de ellas ubicadas en la proteína Spike — Omicron demostró una capacidad de transmisión sin precedentes y una evasión significativa de la inmunidad inducida tanto por vacunación como por infección previa. Su rápida diversificación generó múltiples sublinajes: BA.1, BA.2, BA.4 y BA.5, entre los más relevantes, cada uno con un perfil mutacional propio que condicionó diferencias en transmisibilidad y escape inmune.  
+Durante el primer trimestre de 2022, México y Estados Unidos experimentaron dinámicas epidémicas distintas dentro del mismo contexto de circulación de Omicron. Mientras que en Estados Unidos la subvariante BA.2 escaló aceleradamente hasta convertirse en la cepa dominante hacia marzo de ese año, en México la transición fue más gradual, con BA.1 manteniendo mayor presencia relativa durante ese período. Esta divergencia geográfica en la dinámica de reemplazo de subvariantes ofrece una oportunidad analítica para explorar si las poblaciones virales que circularon en cada país durante ese intervalo acumularon diferencias mutacionales detectables a nivel de genoma completo, y si dichas diferencias son biológicamente interpretables en términos de transmisión o evasión inmune.  
+El presente trabajo tiene como objetivo comparar el perfil mutacional de secuencias de SARS-CoV-2 correspondientes a BA.1 obtenidas en México con secuencias de BA.2 obtenidas en Estados Unidos, ambas del período enero–marzo 2022, mediante herramientas de bioinformática implementadas en R. El análisis busca identificar mutaciones diferenciales — sustituciones, inserciones y deleciones — entre ambos grupos de secuencias, con especial atención a la región codificante de la proteína Spike dado su papel central en la entrada viral y en la respuesta inmune del hospedero.  
+
+## Contexto
+
+El SARS-CoV-2 es un virus de RNA de cadena sencilla con polaridad positiva (+ssRNA), 
+perteneciente a la familia *Coronaviridae*, género *Betacoronavirus*. Su genoma tiene 
+una longitud aproximada de 29,900 pares de bases, lo que lo convierte en uno de los 
+genomas de RNA viral más grandes conocidos. Esta extensión no es trivial: está 
+directamente relacionada con la presencia de una maquinaria de corrección de errores 
+codificada en el propio genoma (la exonucleasa nsp14), un rasgo inusual entre los virus 
+de RNA que confiere al SARS-CoV-2 una tasa de mutación relativamente baja comparada 
+con otros virus de RNA, aunque suficiente para generar la diversidad de variantes 
+observada a lo largo de la pandemia.
+
+El genoma está organizado en 11 genes que codifican un total de 29 proteínas, algunas 
+de ellas producidas mediante procesamiento proteolítico de poliproteínas. La 
+organización genómica sigue el esquema típico de los coronavirus: en el extremo 5' se 
+localiza el gen más grande, *ORF1ab*, seguido de los genes que codifican las proteínas 
+estructurales y, finalmente, los genes accesorios intercalados entre ellos hacia el 
+extremo 3'.
+
+### Los 11 genes del SARS-CoV-2
+
+**1. ORF1a y ORF1b**
+
+Constituyen juntos la región no estructural más extensa del genoma, ocupando 
+aproximadamente dos tercios de su longitud total (~21,000 nt). Se traducen como dos 
+poliproteínas (pp1a y pp1ab) que son procesadas por proteasas virales para generar 16 
+proteínas no estructurales (nsp1–nsp16). Entre ellas destacan la ARN polimerasa 
+dependiente de ARN (RdRp, nsp12), responsable de la replicación del genoma viral; la 
+helicasa (nsp13); la exonucleasa correctora de errores (nsp14); y las proteasas nsp3 
+(PLpro) y nsp5 (3CLpro o Mpro), que han sido dianas prioritarias para el desarrollo de 
+antivirales como el nirmatrelvir (Paxlovid).
+
+**2. S — Proteína Spike**
+
+Codifica la glicoproteína de superficie responsable del reconocimiento y la unión al 
+receptor celular ACE2 (*angiotensin-converting enzyme 2*), así como de la fusión de las 
+membranas viral y celular. Es la proteína más relevante desde el punto de vista 
+inmunológico: constituye el antígeno principal de todas las vacunas autorizadas contra 
+COVID-19 y concentra la mayoría de las mutaciones que definen a las distintas variantes 
+de preocupación. Estructuralmente se divide en dos subunidades: S1 (que contiene el 
+dominio de unión al receptor, RBD) y S2 (que media la fusión de membranas).
+
+**3. ORF3a**
+
+Gen accesorio que codifica una proteína de canal iónico (viroporina) implicada en la 
+liberación de viriones y en la activación del inflamasoma NLRP3, contribuyendo a la 
+respuesta inflamatoria del hospedero. Presenta alta variabilidad entre variantes.
+
+**4. E — Proteína de envoltura**
+
+Proteína estructural pequeña (75 aminoácidos) pero funcionalmente crítica para el 
+ensamblaje y la gemación del virión. También actúa como viroporina. Su alta conservación 
+entre coronavirus la convierte en diana de interés para antivirales de amplio espectro.
+
+**5. M — Proteína de membrana**
+
+La proteína estructural más abundante del virión. Organiza el ensamblaje viral al 
+interactuar con las otras proteínas estructurales (N, E y S) y con el RNA genómico. 
+Define la forma del virión y participa en la curvatura de la membrana durante la gemación.
+
+**6. ORF6**
+
+Proteína accesoria con función antagonista del interferón. Bloquea el transporte 
+núcleo-citoplasmático de factores de transcripción como STAT1 y STAT2, inhibiendo la 
+respuesta antiviral innata del hospedero. Es uno de los principales mecanismos de 
+camuflaje inmunológico del virus.
+
+**7. ORF7a**
+
+Proteína accesoria que interactúa con la proteína BST-2/teterina del hospedero, un 
+factor de restricción viral. También induce apoptosis en células infectadas y modula 
+la respuesta inmune adaptativa al interferir con la presentación de antígenos.
+
+**8. ORF7b**
+
+Proteína de membrana accesoria de función menos caracterizada. Se ha asociado a la 
+modulación de la respuesta de interferón tipo I y a la patogenicidad viral, aunque su 
+rol preciso continúa siendo investigado.
+
+**9. ORF8**
+
+Gen accesorio con alta tasa de mutación y deleción entre variantes. Codifica una 
+proteína secretada que interfiere con la presentación de antígenos vía MHC-I, 
+contribuyendo a la evasión del sistema inmune adaptativo.
+
+**10. N — Proteína de nucleocápside**
+
+Proteína estructural que empaqueta el RNA genómico formando la nucleocápside. Además 
+de su rol estructural, participa en la replicación viral y en la supresión de la 
+respuesta inmune innata. Es el antígeno más abundante durante la infección activa, lo 
+que la convierte en diana diagnóstica de las pruebas de antígeno.
+
+**11. ORF10**
+
+El gen más pequeño y el de función menos clara del genoma. Algunos estudios cuestionan 
+incluso si se traduce eficientemente in vivo. Se ha propuesto que su producto interactúa 
+con el complejo CRL2 de ubiquitina ligasa del hospedero, potencialmente modulando la 
+degradación de proteínas antivirales.
