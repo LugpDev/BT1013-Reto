@@ -116,3 +116,21 @@ El gen más pequeño y el de función menos clara del genoma. Algunos estudios c
 incluso si se traduce eficientemente in vivo. Se ha propuesto que su producto interactúa 
 con el complejo CRL2 de ubiquitina ligasa del hospedero, potencialmente modulando la 
 degradación de proteínas antivirales.
+
+## Hipótesis
+
+> *Las secuencias de SARS-CoV-2 circulantes en México durante el pico de BA.2 
+> (Q1 2022) presentan un perfil de mutaciones puntuales, inserciones y deleciones 
+> significativamente distinto al de las secuencias circulantes en Estados Unidos 
+> durante el mismo período, lo que sugiere que factores demográficos, inmunológicos 
+> o de vigilancia epidemiológica diferencial favorecieron la fijación de mutaciones 
+> específicas en cada contexto geográfico.*
+
+Esta hipótesis se corroborará si el análisis comparativo de alineaciones de genoma 
+completo revela que: las mutaciones diferenciales entre ambos grupos son 
+consistentes al interior de cada país, es decir, que la variabilidad intragrupo es 
+menor que la variabilidad intergrupo; y dichas mutaciones diferenciales se 
+concentran en regiones del genoma con relevancia funcional conocida, particularmente 
+en la proteína Spike. Por el contrario, la hipótesis deberá refutarse si la 
+variabilidad intragrupol supera a la intergrupal, o si las diferencias observadas 
+no muestran un patrón de distribución genómica interpretable biológicamente.
